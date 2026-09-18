@@ -1,0 +1,1 @@
+Python loops let a program repeat a block of code while a condition stays true. The for loop is used to iterate over a sequence such as a list, while the while loop keeps running until a condition becomes false. For example, for value in [1, 2, 3]: print(value) prints each number. This makes programs shorter and easier to read when performing repeated work.

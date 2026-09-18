@@ -1,0 +1,1 @@
+Python loops repeat code while a condition is true.
