@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from sqlmodel import select
 
 from backend.constants import ALLOWED_UPLOAD_EXTENSIONS, MAX_UPLOAD_SIZE_BYTES, UPLOAD_DIR
 from backend.database import get_session
@@ -71,6 +72,30 @@ def create_submission(
         }
 
 
+@router.get("/assignments/{assignment_id}/submissions", response_model=list[dict[str, Any]], status_code=status.HTTP_200_OK)
+def list_submissions_for_assignment(assignment_id: int) -> list[dict[str, Any]]:
+    """Return all submissions for a given assignment."""
+    with get_session() as session:
+        assignment = session.get(Assignment, assignment_id)
+        if assignment is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+
+        submissions = session.exec(select(Submission).where(Submission.assignment_id == assignment_id)).all()
+        return [
+            {
+                "id": submission.id,
+                "assignment_id": submission.assignment_id,
+                "student_name": submission.student_name,
+                "file_name": Path(submission.file_path).name,
+                "file_path": submission.file_path,
+                "status": submission.status,
+                "created_at": submission.created_at,
+                "updated_at": submission.updated_at,
+            }
+            for submission in submissions
+        ]
+
+
 @router.get("/submissions/{submission_id}", response_model=dict[str, Any], status_code=status.HTTP_200_OK)
 def get_submission(submission_id: int) -> dict[str, Any]:
     """Return a single submission record."""
@@ -83,6 +108,7 @@ def get_submission(submission_id: int) -> dict[str, Any]:
             "id": submission.id,
             "assignment_id": submission.assignment_id,
             "student_name": submission.student_name,
+            "file_name": Path(submission.file_path).name,
             "file_path": submission.file_path,
             "status": submission.status,
             "created_at": submission.created_at,
