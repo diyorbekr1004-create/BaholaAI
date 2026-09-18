@@ -1,10 +1,31 @@
 from fastapi.testclient import TestClient
+from sqlmodel import Session, select
 
-from backend.database import init_db
+from backend.database import get_session, init_db
+from backend.db.models import Assignment
 from backend.main import app
 
 
 client = TestClient(app)
+
+
+def test_init_db_clears_old_demo_assignments() -> None:
+    init_db()
+
+    with get_session() as session:
+        session.add_all(
+            [
+                Assignment(teacher_id=1, subject_id=1, title="Demo assignment", description="old"),
+                Assignment(teacher_id=1, subject_id=1, title="Another demo", description="old"),
+            ]
+        )
+        session.commit()
+
+    init_db()
+
+    with get_session() as session:
+        rows = session.exec(select(Assignment)).all()
+    assert rows == []
 
 
 def test_create_assignment_requires_required_fields() -> None:

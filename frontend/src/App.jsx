@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
-import { BrowserRouter, Navigate, Route, Routes, Link } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 import './App.css'
 
-const API_BASE = 'http://127.0.0.1:8000'
+const API_BASE = 'http://127.0.0.1:8001'
 const defaultCriteria = [{ name: '', max_score: 10 }]
+const starterAssignments = []
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
@@ -28,25 +29,44 @@ async function fetchJson(url, options = {}) {
 }
 
 function App() {
+  const fileInputRef = useRef(null)
   const [isLoggedIn, setIsLoggedIn] = useState(true)
-  const [assignments, setAssignments] = useState([])
+  const [activeTab, setActiveTab] = useState('assignments')
+  const [assignments, setAssignments] = useState(starterAssignments)
   const [rubrics, setRubrics] = useState({})
   const [submissions, setSubmissions] = useState([])
   const [selectedAssignmentId, setSelectedAssignmentId] = useState(null)
-  const [newAssignment, setNewAssignment] = useState({ title: '', description: '' })
+  const [assignmentSearch, setAssignmentSearch] = useState('')
+  const [newAssignment, setNewAssignment] = useState({
+    title: '',
+    description: '',
+    deadline: '',
+    attachment: null,
+  })
   const [criteriaDraft, setCriteriaDraft] = useState(defaultCriteria)
   const [studentName, setStudentName] = useState('')
   const [selectedFile, setSelectedFile] = useState(null)
   const [errorMessage, setErrorMessage] = useState('')
+  const [chatInput, setChatInput] = useState('')
+  const [chatMessages, setChatMessages] = useState([
+    {
+      role: 'ai',
+      text: 'Assalomu alaykum! Men BaholaAI yordamchisiman. Talaba javobi, topshiriq yoki oquv materiallari haqida biror masalada yordam bera olaman.',
+    },
+  ])
+  const [chatLoading, setChatLoading] = useState(false)
 
   const loadAssignments = async () => {
     try {
       const data = await fetchJson(`${API_BASE}/assignments`)
-      setAssignments(data)
-      if (!selectedAssignmentId && data.length) {
-        setSelectedAssignmentId(data[0].id)
+      const nextAssignments = Array.isArray(data) ? data : []
+
+      setAssignments(nextAssignments)
+      if (!selectedAssignmentId && nextAssignments.length) {
+        setSelectedAssignmentId(nextAssignments[0].id)
       }
     } catch (err) {
+      setAssignments([])
       setErrorMessage(err.message)
     }
   }
@@ -97,9 +117,22 @@ function App() {
     }
   }, [selectedAssignmentId])
 
+  const filteredAssignments = useMemo(() => {
+    if (!assignmentSearch.trim()) return assignments
+    const query = assignmentSearch.toLowerCase()
+    return assignments.filter(
+      (assignment) =>
+        assignment.title.toLowerCase().includes(query) ||
+        assignment.description.toLowerCase().includes(query),
+    )
+  }, [assignments, assignmentSearch])
+
   const selectedAssignment = useMemo(
-    () => assignments.find((item) => item.id === selectedAssignmentId) ?? assignments[0] ?? null,
-    [assignments, selectedAssignmentId],
+    () =>
+      assignments.find((item) => item.id === selectedAssignmentId) ??
+      filteredAssignments[0] ??
+      null,
+    [assignments, filteredAssignments, selectedAssignmentId],
   )
 
   const selectedRubric = useMemo(
@@ -138,16 +171,25 @@ function App() {
           subject_id: 1,
           title: newAssignment.title.trim(),
           description: newAssignment.description.trim() || 'Yangi topshiriq tayyorlandi.',
+          deadline: newAssignment.deadline || null,
         }),
       })
 
       setAssignments((previous) => [created, ...previous])
       setSelectedAssignmentId(created.id)
-      setNewAssignment({ title: '', description: '' })
+      setNewAssignment({ title: '', description: '', deadline: '', attachment: null })
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
       setErrorMessage('')
     } catch (err) {
       setErrorMessage(err.message)
     }
+  }
+
+  const handleAttachmentChange = (event) => {
+    const file = event.target.files?.[0] || null
+    setNewAssignment((previous) => ({ ...previous, attachment: file }))
   }
 
   const handleCriteriaChange = (index, field, value) => {
@@ -333,98 +375,45 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route
-          path="/"
-          element={
-            isLoggedIn ? (
-              <Navigate to="/dashboard" replace />
-            ) : (
-              <LoginScreen onLogin={() => setIsLoggedIn(true)} />
-            )
-          }
-        />
-        <Route
-          path="/dashboard"
-          element={
-            isLoggedIn ? (
-              <Dashboard
-                assignments={assignments}
-                selectedAssignment={selectedAssignment}
-                setSelectedAssignmentId={setSelectedAssignmentId}
-                newAssignment={newAssignment}
-                setNewAssignment={setNewAssignment}
-                handleCreateAssignment={handleCreateAssignment}
-                criteriaDraft={criteriaDraft}
-                handleCriteriaChange={handleCriteriaChange}
-                handleAddCriteria={handleAddCriteria}
-                handleSaveRubric={handleSaveRubric}
-                selectedRubric={selectedRubric}
-                studentName={studentName}
-                setStudentName={setStudentName}
-                selectedFile={selectedFile}
-                setSelectedFile={setSelectedFile}
-                handleSubmissionUpload={handleSubmissionUpload}
-                assignmentSubmissions={assignmentSubmissions}
-                handleApproveSubmission={handleApproveSubmission}
-                handleExportReport={handleExportReport}
-                averageScore={averageScore}
-                onLogout={() => setIsLoggedIn(false)}
-                errorMessage={errorMessage}
-              />
-            ) : (
-              <Navigate to="/" replace />
-            )
-          }
-        />
-      </Routes>
-    </BrowserRouter>
-  )
-}
+  const handleSendChat = async () => {
+    const message = chatInput.trim()
+    if (!message) return
 
-function LoginScreen({ onLogin }) {
-  return (
-    <div className="auth-shell">
-      <div className="auth-card">
-        <span className="eyebrow">BaholaAI</span>
-        <h1>O'qituvchi kabineti</h1>
-        <p>
-          Topshiriq, rubrika, javob va baholash jarayonini bitta dashboarddan boshqaring.
-        </p>
-        <button type="button" className="primary-button" onClick={onLogin}>
-          Kirish
-        </button>
-      </div>
-    </div>
-  )
-}
+    setChatMessages((previous) => [...previous, { role: 'user', text: message }])
+    setChatInput('')
+    setChatLoading(true)
 
-function Dashboard({
-  assignments,
-  selectedAssignment,
-  setSelectedAssignmentId,
-  newAssignment,
-  setNewAssignment,
-  handleCreateAssignment,
-  criteriaDraft,
-  handleCriteriaChange,
-  handleAddCriteria,
-  handleSaveRubric,
-  selectedRubric,
-  studentName,
-  setStudentName,
-  selectedFile,
-  setSelectedFile,
-  handleSubmissionUpload,
-  assignmentSubmissions,
-  handleApproveSubmission,
-  handleExportReport,
-  averageScore,
-  onLogout,
-  errorMessage,
-}) {
+    try {
+      const context = selectedAssignment
+        ? `Topshiriq: ${selectedAssignment.title}. ${selectedAssignment.description || ''}`
+        : 'Umumiy akademik yordam'
+
+      const data = await fetchJson(`${API_BASE}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message,
+          context,
+        }),
+      })
+
+      const replyText = data?.reply || 'AI javobi bo’sh qaytdi.'
+      setChatMessages((previous) => [...previous, { role: 'ai', text: replyText }])
+    } catch (err) {
+      setChatMessages((previous) => [
+        ...previous,
+        {
+          role: 'ai',
+          text: 'AI server bilan aloqa uzildi. Backend ishlayotganini tekshiring yoki keyinroq qayta urinib ko’ring.',
+        },
+      ])
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -433,151 +422,268 @@ function Dashboard({
           <h2>Tekshirish paneli</h2>
         </div>
         <nav className="topbar-nav" aria-label="Asosiy navigatsiya">
-          <Link to="/dashboard">Topshiriqlar</Link>
-          <Link to="/dashboard">Javoblar</Link>
-          <Link to="/dashboard">Statistika</Link>
+          {[
+            { id: 'assignments', label: 'Topshiriqlar' },
+            { id: 'submissions', label: 'Javoblar' },
+            { id: 'reports', label: 'Statistika' },
+            { id: 'subscriptions', label: 'Obunalar' },
+            { id: 'ai', label: 'AI Yordamchi' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={activeTab === tab.id ? 'nav-button active' : 'nav-button'}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </nav>
-        <button type="button" onClick={onLogout} className="secondary-button">
+        <button type="button" onClick={() => setIsLoggedIn(false)} className="secondary-button">
           Chiqish
         </button>
       </header>
 
       <main className="dashboard-grid">
-        <aside className="sidebar">
-          <div className="panel">
-            <div className="panel-header">
-              <h3>Topshiriqlar</h3>
-              <span>{assignments.length}</span>
-            </div>
-            <div className="assignment-list">
-              {assignments.map((assignment) => (
-                <button
-                  key={assignment.id}
-                  type="button"
-                  className={
-                    selectedAssignment && assignment.id === selectedAssignment.id
-                      ? 'assignment-card active'
-                      : 'assignment-card'
-                  }
-                  onClick={() => setSelectedAssignmentId(assignment.id)}
-                >
-                  <strong>{assignment.title}</strong>
-                  <small>{assignment.description}</small>
-                </button>
-              ))}
-            </div>
-          </div>
-        </aside>
+        {activeTab !== 'ai' && activeTab !== 'subscriptions' && (
+          <aside className="sidebar">
+            <div className="panel">
+              <div className="panel-header">
+                <h3>Topshiriqlar</h3>
+                <span>{assignments.length}</span>
+              </div>
 
-        <section className="content">
-          {selectedAssignment && (
+              <div className="flex flex-col gap-3 mb-4">
+                <button
+                  type="button"
+                  className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                  onClick={() => setActiveTab('assignments')}
+                >
+                  + Yangi topshiriq
+                </button>
+
+                <div className="search-box mb-0">
+                  <input
+                    type="search"
+                    value={assignmentSearch}
+                    onChange={(event) => setAssignmentSearch(event.target.value)}
+                    placeholder="Topshiriqni qidiring..."
+                  />
+                </div>
+              </div>
+
+              <div className="assignment-list">
+                {filteredAssignments.map((assignment) => (
+                  <button
+                    key={assignment.id}
+                    type="button"
+                    className={
+                      selectedAssignment && assignment.id === selectedAssignment.id
+                        ? 'assignment-card active'
+                        : 'assignment-card'
+                    }
+                    onClick={() => setSelectedAssignmentId(assignment.id)}
+                  >
+                    <strong>{assignment.title}</strong>
+                    <small>{assignment.description}</small>
+                    {assignment.deadline && (
+                      <span className="assignment-meta">
+                        Muddat: {new Date(assignment.deadline).toLocaleString('uz-UZ')}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </aside>
+        )}
+
+        <section className="content w-full flex-1 p-6">
+          {selectedAssignment && activeTab !== 'ai' && (
             <div className="panel spotlight">
               <div>
                 <span className="eyebrow">Tanlangan topshiriq</span>
                 <h3>{selectedAssignment.title}</h3>
               </div>
-              <p>{selectedAssignment.description}</p>
+
+              <div className="assignment-action-group">
+                <button type="button" className="ghost-button">
+                  ✎ Tahrirlash
+                </button>
+                <button type="button" className="danger-button">
+                  🗑 O'chirish
+                </button>
+              </div>
             </div>
           )}
 
-          <div className="panel">
-            <div className="panel-header">
-              <h3>Topshiriq yaratish</h3>
-            </div>
-            <form className="stacked-form" onSubmit={handleCreateAssignment}>
-              <label>
-                Nomi
-                <input
-                  type="text"
-                  value={newAssignment.title}
-                  onChange={(event) =>
-                    setNewAssignment((previous) => ({ ...previous, title: event.target.value }))
-                  }
-                  placeholder="Masalan: Oliy matematika - limitlar"
-                />
-              </label>
-              <label>
-                Tavsif
-                <textarea
-                  rows="3"
-                  value={newAssignment.description}
-                  onChange={(event) =>
-                    setNewAssignment((previous) => ({ ...previous, description: event.target.value }))
-                  }
-                  placeholder="Topshiriq maqsadi va talablarini yozing"
-                />
-              </label>
-              <button type="submit" className="primary-button">
-                Saqlash
-              </button>
-            </form>
-          </div>
-
-          {selectedAssignment && (
-            <div className="panel">
-              <div className="panel-header">
-                <h3>Rubrikani sozlash</h3>
-                <span>{selectedRubric.criteria.length} mezon</span>
-              </div>
-              <div className="criteria-list">
-                {criteriaDraft.map((criterion, index) => (
-                  <div key={`${criterion.name || 'criterion'}-${index}`} className="criterion-row">
+          {activeTab === 'assignments' && (
+            <>
+              <div className="panel">
+                <div className="panel-header">
+                  <h3>Topshiriq yaratish</h3>
+                </div>
+                <form className="stacked-form" onSubmit={handleCreateAssignment}>
+                  <label>
+                    Nomi
                     <input
                       type="text"
-                      value={criterion.name}
-                      placeholder="Kriteriya nomi"
-                      onChange={(event) => handleCriteriaChange(index, 'name', event.target.value)}
+                      value={newAssignment.title}
+                      onChange={(event) =>
+                        setNewAssignment((previous) => ({ ...previous, title: event.target.value }))
+                      }
+                      placeholder="Masalan: Oliy matematika - limitlar"
                     />
-                    <input
-                      type="number"
-                      min="1"
-                      value={criterion.max_score}
-                      onChange={(event) => handleCriteriaChange(index, 'max_score', event.target.value)}
+                  </label>
+
+                  <label>
+                    Tavsif
+                    <textarea
+                      rows="3"
+                      value={newAssignment.description}
+                      onChange={(event) =>
+                        setNewAssignment((previous) => ({ ...previous, description: event.target.value }))
+                      }
+                      placeholder="Topshiriq maqsadi va talablarini yozing"
                     />
+                  </label>
+
+                  <div className="two-column-fields">
+                    <label>
+                      Oxirgi muddat
+                      <input
+                        type="datetime-local"
+                        value={newAssignment.deadline}
+                        onChange={(event) =>
+                          setNewAssignment((previous) => ({ ...previous, deadline: event.target.value }))
+                        }
+                      />
+                    </label>
+
+                    <label className="file-upload-field">
+                      Fayl biriktirish
+                      <div className="file-upload-button">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          onChange={handleAttachmentChange}
+                        />
+                        <span>
+                          {newAssignment.attachment ? newAssignment.attachment.name : 'Fayl tanlash'}
+                        </span>
+                      </div>
+                    </label>
                   </div>
-                ))}
+
+                  <div className="inline-actions">
+                    <button type="button" className="secondary-button">
+                      Bekor qilish
+                    </button>
+                    <button type="submit" className="primary-button">
+                      Topshiriq yaratish
+                    </button>
+                  </div>
+                </form>
               </div>
-              <div className="inline-actions">
-                <button type="button" className="secondary-button" onClick={handleAddCriteria}>
-                  Yana qo'shish
-                </button>
-                <button type="button" className="primary-button" onClick={handleSaveRubric}>
-                  Rubrikani saqlash
-                </button>
-              </div>
-            </div>
+
+              {selectedAssignment && (
+                <div className="panel assignment-detail-panel">
+                  <div className="detail-header">
+                    <div className="detail-copy">
+                      <p className="label">Nomi</p>
+                      <h4>{selectedAssignment.title}</h4>
+                    </div>
+                    <div className="detail-copy">
+                      <p className="label">Muddat</p>
+                      <h4>
+                        {selectedAssignment.deadline
+                          ? new Date(selectedAssignment.deadline).toLocaleString('uz-UZ')
+                          : 'Muddat belgilanmagan'}
+                      </h4>
+                    </div>
+                  </div>
+
+                  <div className="detail-copy">
+                    <p className="label">Tavsif</p>
+                    <p className="description-text">{selectedAssignment.description}</p>
+                  </div>
+
+                  <div className="attachment-box">
+                    <span className="label">Biriktirilgan fayl</span>
+                    <div className="attachment-pill">
+                      {selectedAssignment.attachmentName || 'Fayl yo\'q'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {selectedAssignment && (
+                <div className="panel">
+                  <div className="panel-header">
+                    <h3>Rubrikani sozlash</h3>
+                    <span>{selectedRubric.criteria.length} mezon</span>
+                  </div>
+                  <div className="criteria-list">
+                    {criteriaDraft.map((criterion, index) => (
+                      <div key={`${criterion.name || 'criterion'}-${index}`} className="criterion-row">
+                        <input
+                          type="text"
+                          value={criterion.name}
+                          placeholder="Kriteriya nomi"
+                          onChange={(event) => handleCriteriaChange(index, 'name', event.target.value)}
+                        />
+                        <input
+                          type="number"
+                          min="1"
+                          value={criterion.max_score}
+                          onChange={(event) => handleCriteriaChange(index, 'max_score', event.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="inline-actions">
+                    <button type="button" className="secondary-button" onClick={handleAddCriteria}>
+                      Yana qo'shish
+                    </button>
+                    <button type="button" className="primary-button" onClick={handleSaveRubric}>
+                      Rubrikani saqlash
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedAssignment && (
+                <div className="panel">
+                  <div className="panel-header">
+                    <h3>Talaba javobini yuklash</h3>
+                  </div>
+                  <form className="stacked-form" onSubmit={handleSubmissionUpload}>
+                    <label>
+                      Talaba ismi
+                      <input
+                        type="text"
+                        value={studentName}
+                        onChange={(event) => setStudentName(event.target.value)}
+                        placeholder="Masalan: Bobur Karimov"
+                      />
+                    </label>
+                    <label>
+                      Fayl tanlash
+                      <input
+                        type="file"
+                        onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
+                      />
+                    </label>
+                    <button type="submit" className="primary-button">
+                      AI bilan tekshirish
+                    </button>
+                  </form>
+                </div>
+              )}
+            </>
           )}
 
-          {selectedAssignment && (
-            <div className="panel">
-              <div className="panel-header">
-                <h3>Talaba javobini yuklash</h3>
-              </div>
-              <form className="stacked-form" onSubmit={handleSubmissionUpload}>
-                <label>
-                  Talaba ismi
-                  <input
-                    type="text"
-                    value={studentName}
-                    onChange={(event) => setStudentName(event.target.value)}
-                    placeholder="Masalan: Bobur Karimov"
-                  />
-                </label>
-                <label>
-                  Fayl tanlash
-                  <input
-                    type="file"
-                    onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
-                  />
-                </label>
-                <button type="submit" className="primary-button">
-                  AI bilan tekshirish
-                </button>
-              </form>
-            </div>
-          )}
-
-          {selectedAssignment && (
+          {activeTab === 'submissions' && selectedAssignment && (
             <div className="panel">
               <div className="panel-header">
                 <h3>Javoblar va baholash</h3>
@@ -628,20 +734,122 @@ function Dashboard({
             </div>
           )}
 
-          <div className="stats-grid">
-            <div className="panel metric-card">
-              <span>Jami javoblar</span>
-              <strong>{assignmentSubmissions.length}</strong>
+          {activeTab === 'reports' && (
+            <div className="stats-grid">
+              <div className="panel metric-card">
+                <span>Jami javoblar</span>
+                <strong>{assignmentSubmissions.length}</strong>
+              </div>
+              <div className="panel metric-card">
+                <span>O'rtacha ball</span>
+                <strong>{Number(averageScore || 0).toFixed(2)}</strong>
+              </div>
+              <div className="panel metric-card">
+                <span>Ko'p uchraydigan xato</span>
+                <strong>{selectedRubric.criteria[0]?.name || 'Yuklanmoqda'}</strong>
+              </div>
             </div>
-            <div className="panel metric-card">
-              <span>O'rtacha ball</span>
-              <strong>{Number(averageScore || 0).toFixed(2)}</strong>
+          )}
+
+          {activeTab === 'subscriptions' && (
+            <div className="subscriptions-section panel w-full max-w-5xl mx-auto">
+              <div className="panel-header subscriptions-header">
+                <div>
+                  <span className="eyebrow">Obunalar</span>
+                  <h3>Bahola AI tariflari</h3>
+                </div>
+              </div>
+
+              <div className="pricing-grid grid grid-cols-1 md:grid-cols-3 gap-8 w-full max-w-5xl mx-auto">
+                <div className="pricing-card">
+                  <div className="plan-label">Free</div>
+                  <h4>Bahola AI Free</h4>
+                  <div className="price-row">
+                    <span className="price">$0</span>
+                  </div>
+                  <p className="plan-description">Bepul</p>
+                  <ul>
+                    <li>Oyiga 60 ta AI tekshirish</li>
+                    <li>Asosiy baholash imkoniyati</li>
+                    <li>Minimal ishlash limitlari</li>
+                  </ul>
+                  <button type="button" className="secondary-button full-width">
+                    Hozir boshlash
+                  </button>
+                </div>
+
+                <div className="pricing-card featured">
+                  <div className="featured-badge">Eng mashhur</div>
+                  <div className="plan-label">Plus</div>
+                  <h4>Bahola AI Plus</h4>
+                  <div className="price-row">
+                    <span className="old-price">$10</span>
+                    <span className="price">$7</span>
+                  </div>
+                  <p className="plan-description">Chegirmali narx</p>
+                  <ul>
+                    <li>Oyiga 500 ta AI tekshirish</li>
+                    <li>Kengaytirilgan rubricalar</li>
+                    <li>Tezkor revisiya va xulosa</li>
+                  </ul>
+                  <button type="button" className="primary-button full-width">
+                    Tanlash
+                  </button>
+                </div>
+
+                <div className="pricing-card">
+                  <div className="plan-label">Pro</div>
+                  <h4>Bahola AI Pro</h4>
+                  <div className="price-row">
+                    <span className="price">$22</span>
+                    <span className="period">/ oy</span>
+                  </div>
+                  <p className="plan-description">Professional</p>
+                  <ul>
+                    <li>Oyiga 1500 ta AI tekshirish</li>
+                    <li>Ko'proq talabalar va guruhlar</li>
+                    <li>Yuqori quvvatli ishlash</li>
+                  </ul>
+                  <button type="button" className="secondary-button full-width">
+                    Pro uchun tanlash
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="panel metric-card">
-              <span>Ko'p uchraydigan xato</span>
-              <strong>{selectedRubric.criteria[0]?.name || 'Yuklanmoqda'}</strong>
+          )}
+
+          {activeTab === 'ai' && (
+            <div className="chat-panel panel w-full max-w-4xl mx-auto">
+              <div className="panel-header">
+                <h3>AI Yordamchi</h3>
+              </div>
+              <div className="chat-messages w-full">
+                {chatMessages.map((message, index) => (
+                  <div key={`${message.role}-${index}`} className={message.role === 'user' ? 'chat-row user' : 'chat-row ai'}>
+                    <div className="chat-bubble">
+                      {message.role === 'user' ? (
+                        message.text
+                      ) : (
+                        <ReactMarkdown>{message.text}</ReactMarkdown>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {chatLoading && <div className="chat-row ai"><div className="chat-bubble typing">Yozilmoqda...</div></div>}
+              </div>
+              <div className="chat-input-row w-full max-w-4xl mx-auto">
+                <textarea
+                  rows="3"
+                  value={chatInput}
+                  onChange={(event) => setChatInput(event.target.value)}
+                  placeholder="Topshiriq, talaba javobi yoki o'quv materiali haqida savol bering..."
+                />
+                <button type="button" className="primary-button" onClick={handleSendChat} disabled={chatLoading}>
+                  {chatLoading ? 'Yuborilmoqda...' : 'Yuborish'}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {errorMessage && <div className="error-banner">{errorMessage}</div>}
         </section>
